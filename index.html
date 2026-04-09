@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Weather Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body data-theme="default">
+    <div class="weather-app">
+        <div class="search-section">
+            <div class="search-box">
+                <input type="text" id="cityInput" placeholder="Search city... London, Tokyo, New York" autocomplete="off">
+                <button id="searchBtn"><i class="fas fa-search"></i> Search</button>
+            </div>
+            <div class="unit-toggle" id="unitToggle">
+                <button class="unit-btn active" data-unit="metric">°C</button>
+                <button class="unit-btn" data-unit="imperial">°F</button>
+            </div>
+        </div>
+
+        <div class="recent-cities" id="recentContainer"></div>
+
+        <div id="loadingSpinner" class="hidden">
+            <div class="loader"></div>
+            <p>Fetching weather data...</p>
+        </div>
+
+        <div id="weatherContent">
+            <div class="current-weather">
+                <div class="temp-area">
+                    <div class="city-name">
+                        <span id="cityName">--</span>
+                        <i id="weatherIcon" class="fas fa-cloud-moon"></i>
+                    </div>
+                    <div class="temp-main">
+                        <span id="mainTemp">--</span>°<span id="tempUnitSym">C</span>
+                    </div>
+                    <div class="condition" id="conditionText">--</div>
+                    <div class="details">
+                        <div class="detail-item"><i class="fas fa-tint"></i> Humidity: <span id="humidity">--</span>%</div>
+                        <div class="detail-item"><i class="fas fa-wind"></i> Wind: <span id="windSpeed">--</span> <span id="windUnit">km/h</span></div>
+                        <div class="detail-item"><i class="fas fa-temperature-high"></i> Feels: <span id="feelsLike">--</span>°</div>
+                        <div class="detail-item"><i class="fas fa-cloud-rain"></i> Precipitation: <span id="precipProb">--</span>%</div>
+                    </div>
+                </div>
+                <div class="astro-info">
+                  <div class="astro-item">
+                    <div class="astro-icon">🌅</div>
+                      <div class="astro-details">
+                        <span class="astro-label">Sunrise</span>
+                        <span class="astro-time" id="sunriseTime">--:--</span>
+                      </div>
+                  </div>
+                  <div class="astro-item">
+                    <div class="astro-icon">🌇</div>
+                    <div class="astro-details">
+                      <span class="astro-label">Sunset</span>
+                      <span class="astro-time" id="sunsetTime">--:--</span>
+                    </div>
+                  </div>
+                </div>
+            </div>
+
+            <div class="section-title"><i class="fas fa-clock"></i> Hourly Forecast</div>
+            <div class="hourly-scroll" id="hourlyContainer">
+                <div class="placeholder-text">Search for a city to see hourly forecast</div>
+            </div>
+
+            <div class="section-title"><i class="fas fa-calendar-alt"></i> 7-Day Forecast</div>
+            <div class="weekly-grid" id="weeklyContainer">
+                <div class="placeholder-text">Search for a city to see weekly forecast</div>
+            </div>
+        </div>
+        <div id="errorMsg" class="error-msg hidden"></div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
