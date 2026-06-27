@@ -69,48 +69,58 @@ function renderRecentChips() {
                 <i class="fas fa-times-circle"></i>
             </span>
         `;
-        
-        // Click on city name to search
+
         chip.addEventListener('click', (e) => {
             if (!e.target.closest('.delete-city')) {
                 cityInput.value = city;
                 fetchWeatherData(city);
             }
         });
-        
-        // Click on delete icon to remove individual city
+
         const deleteBtn = chip.querySelector('.delete-city');
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             removeCityAtIndex(index);
         });
-        
+
         recentContainer.appendChild(chip);
     });
 }
 
-// Remove individual city
 function removeCityAtIndex(index) {
     recentCities.splice(index, 1);
     saveRecentCities();
     renderRecentChips();
 }
 
-function setThemeByCondition(conditionText) {
+function setThemeByCondition(conditionText, isDay = true) {
     const cond = conditionText.toLowerCase();
     const body = document.body;
+    let theme = 'default';
+
     if (cond.includes('thunder') || cond.includes('storm')) {
-        body.setAttribute('data-theme', 'thunder');
-    } else if (cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower')) {
-        body.setAttribute('data-theme', 'rain');
-    } else if (cond.includes('cloud')) {
-        body.setAttribute('data-theme', 'clouds');
-    } else if (cond.includes('clear') || cond.includes('sunny')) {
-        body.setAttribute('data-theme', 'clear');
+        theme = 'thunder';
+    } else if (cond.includes('violent') || cond.includes('heavy')) {
+        theme = 'heavy-rain';
+    } else if (cond.includes('drizzle') || cond.includes('light rain') || cond.includes('slight rain')) {
+        theme = 'drizzle';
+    } else if (cond.includes('rain') || cond.includes('shower')) {
+        theme = 'rain';
     } else if (cond.includes('snow')) {
-        body.setAttribute('data-theme', 'snow');
-    } else {
-        body.setAttribute('data-theme', 'default');
+        theme = 'snow';
+    } else if (cond.includes('fog') || cond.includes('mist')) {
+        theme = 'fog';
+    } else if (cond.includes('cloud') || cond.includes('overcast')) {
+        theme = 'clouds';
+    } else if (cond.includes('clear') || cond.includes('sunny') || cond.includes('mainly clear')) {
+        theme = isDay ? 'clear' : 'clear-night';
+    }
+
+    body.setAttribute('data-theme', theme);
+
+    // Hand off to the effects engine if it's loaded
+    if (typeof WeatherEffects !== 'undefined') {
+        WeatherEffects.set(theme);
     }
 }
 
@@ -126,10 +136,17 @@ function setLoading(loading) {
 }
 
 function showError(message) {
-    setLoading(false);
-    weatherContentDiv.classList.add('hidden');
+    loadingSpinner.classList.add('hidden');
     errorMsgDiv.classList.remove('hidden');
     errorMsgDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${message}`;
+
+    // FIX 5: Only hide weather content if there's no valid data loaded yet.
+    // Previously, showError() always hid weatherContentDiv, meaning after an
+    // error the weather panel stayed hidden even when valid data was present.
+    if (!currentWeatherData) {
+        weatherContentDiv.classList.add('hidden');
+    }
+
     setTimeout(() => {
         if (errorMsgDiv && !errorMsgDiv.classList.contains('hidden')) {
             errorMsgDiv.classList.add('hidden');
@@ -177,11 +194,11 @@ async function fetchWeatherData(cityName) {
         // Step 1: Geocoding API
         const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
         const geoResponse = await fetch(geoUrl);
-        
+
         if (!geoResponse.ok) {
             throw new Error("Geocoding service error");
         }
-        
+
         const geoData = await geoResponse.json();
 
         if (!geoData.results || geoData.results.length === 0) {
@@ -193,13 +210,16 @@ async function fetchWeatherData(cityName) {
         cityNameSpan.innerText = displayName;
 
         // Step 2: Weather API
-        const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode,windspeed_10m,precipitation_probability&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max&timezone=auto&forecast_days=7`;
+        // FIX 1: Added apparent_temperature to hourly params so feels-like is real data.
+        // FIX 6: Open-Meteo renamed weathercode → weather_code; both field names requested
+        //        for backwards compatibility; code below reads whichever is present.
+        const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,weather_code,weathercode,windspeed_10m,precipitation_probability&daily=weather_code,weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max&timezone=auto&forecast_days=7`;
         const weatherResponse = await fetch(forecastUrl);
-        
+
         if (!weatherResponse.ok) {
             throw new Error("Weather service error");
         }
-        
+
         const weather = await weatherResponse.json();
 
         if (!weather.current_weather) {
@@ -210,10 +230,21 @@ async function fetchWeatherData(cityName) {
         const hourly = weather.hourly;
         const daily = weather.daily;
 
-        // Find current hour index
+        // FIX 6: Normalise field name — Open-Meteo uses weather_code in newer responses
+        // but older versions use weathercode. Read whichever is present.
+        if (!hourly.weathercode && hourly.weather_code) hourly.weathercode = hourly.weather_code;
+        if (!daily.weathercode && daily.weather_code) daily.weathercode = daily.weather_code;
+        if (current.weather_code !== undefined && current.weathercode === undefined) {
+            current.weathercode = current.weather_code;
+        }
+
+        // FIX 2: Match current hour by ISO prefix ("YYYY-MM-DDTHH") instead of exact
+        // string equality, which could fail if Open-Meteo formats timestamps differently.
+        // Previously used exact equality; now trims to the hour for a robust match.
         let currentHourIndex = 0;
+        const currentHourPrefix = current.time.slice(0, 13); // e.g. "2024-02-08T14"
         for (let i = 0; i < hourly.time.length; i++) {
-            if (hourly.time[i] === current.time) {
+            if (hourly.time[i].startsWith(currentHourPrefix)) {
                 currentHourIndex = i;
                 break;
             }
@@ -227,41 +258,51 @@ async function fetchWeatherData(cityName) {
             const code = current.weathercode;
             if ([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96].includes(code)) precipValue = 75;
             else if ([71, 73, 75].includes(code)) precipValue = 55;
-            else precipValue = Math.floor(Math.random() * 20);
+            // FIX 3: Removed Math.random() fallback — was giving a different value every
+            // search for the same city. Now defaults to 0 (honest "no data").
+            else precipValue = 0;
         }
 
         // Get humidity
         let humidityValue = 65;
-        if (hourly.relativehumidity_2m && hourly.relativehumidity_2m[currentHourIndex]) {
+        if (hourly.relativehumidity_2m && hourly.relativehumidity_2m[currentHourIndex] !== undefined) {
             humidityValue = hourly.relativehumidity_2m[currentHourIndex];
+        }
+
+        // FIX 1: Read real apparent_temperature from hourly data at the current hour.
+        // Previously feelsLikeC was set to current.temperature (same as main temp).
+        let feelsLikeC = current.temperature;
+        if (hourly.apparent_temperature && hourly.apparent_temperature[currentHourIndex] !== undefined) {
+            feelsLikeC = hourly.apparent_temperature[currentHourIndex];
         }
 
         const weatherPackage = {
             currentTempC: current.temperature,
             currentWindKmph: current.windspeed,
-            feelsLikeC: current.temperature,
+            feelsLikeC: feelsLikeC,   // FIX 1: now a real value
             humidity: humidityValue,
             conditionCode: current.weathercode,
             hourlyData: hourly,
             dailyData: daily,
             sunrise: daily.sunrise[0],
             sunset: daily.sunset[0],
-            precipitationPercent: precipValue
+            precipitationPercent: precipValue,
+            currentTime: current.time
         };
-        
+
         currentWeatherData = weatherPackage;
+
+        // isDay must be calculated BEFORE setThemeByCondition which uses it
+        const now = new Date(current.time);
+        const sunrise = new Date(daily.sunrise[0]);
+        const sunset = new Date(daily.sunset[0]);
+        const isDay = now >= sunrise && now <= sunset;
 
         const conditionText = mapWeatherCodeToText(current.weathercode);
         conditionSpan.innerText = conditionText;
         humiditySpan.innerText = weatherPackage.humidity;
         precipSpan.innerText = weatherPackage.precipitationPercent;
-        setThemeByCondition(conditionText);
-
-        // Check if day or night
-        const now = new Date(current.time);
-        const sunrise = new Date(daily.sunrise[0]);
-        const sunset = new Date(daily.sunset[0]);
-        const isDay = now >= sunrise && now <= sunset;
+        setThemeByCondition(conditionText, isDay);
         weatherIconElem.className = getWeatherIconClass(current.weathercode, isDay);
 
         // Format sunrise/sunset times
@@ -286,7 +327,7 @@ async function fetchWeatherData(cityName) {
 
 function updateDisplayByUnit(unit) {
     if (!currentWeatherData) return;
-    
+
     const tempC = currentWeatherData.currentTempC;
     const tempF = (tempC * 9 / 5) + 32;
     const windKmph = currentWeatherData.currentWindKmph;
@@ -307,9 +348,9 @@ function updateDisplayByUnit(unit) {
         windUnitSpan.innerText = "mph";
         tempUnitSymSpan.innerText = "F";
     }
-    
+
     if (currentWeatherData.hourlyData) {
-        renderHourlyForecast(currentWeatherData.hourlyData, null, unit);
+        renderHourlyForecast(currentWeatherData.hourlyData, currentWeatherData.currentTime, unit);
     }
     if (currentWeatherData.dailyData) {
         renderWeeklyForecast(currentWeatherData.dailyData, unit);
@@ -326,11 +367,16 @@ function renderHourlyForecast(hourly, currentTimeStr, unit) {
         return;
     }
 
-    const nowHour = currentTimeStr ? new Date(currentTimeStr).getHours() : new Date().getHours();
+    // FIX 4: Compare full ISO date+hour string ("YYYY-MM-DDTHH") instead of just
+    // getHours() (0–23). The old approach could match the same clock-hour on a future
+    // day, causing the scroll to start from the wrong point after midnight.
+    const currentHourPrefix = currentTimeStr
+        ? currentTimeStr.slice(0, 13)
+        : new Date().toISOString().slice(0, 16).slice(0, 13);
+
     let startIdx = 0;
     for (let i = 0; i < hourly.time.length; i++) {
-        const hour = new Date(hourly.time[i]).getHours();
-        if (hour >= nowHour) {
+        if (hourly.time[i].slice(0, 13) >= currentHourPrefix) {
             startIdx = i;
             break;
         }
@@ -343,9 +389,10 @@ function renderHourlyForecast(hourly, currentTimeStr, unit) {
         let temp = hourly.temperature_2m[i];
         if (unit === "imperial") temp = (temp * 9 / 5) + 32;
         const weatherCode = hourly.weathercode[i];
-        const precipProb = (hourly.precipitation_probability && hourly.precipitation_probability[i]) ? hourly.precipitation_probability[i] : 0;
+        const precipProb = (hourly.precipitation_probability && hourly.precipitation_probability[i] !== undefined)
+            ? hourly.precipitation_probability[i] : 0;
         const icon = getMiniIcon(weatherCode);
-        
+
         const card = document.createElement('div');
         card.className = 'hour-card';
         card.innerHTML = `
@@ -386,7 +433,7 @@ function renderWeeklyForecast(daily, unit) {
         }
         const precipMax = daily.precipitation_probability_max ? daily.precipitation_probability_max[i] : 0;
         const icon = getMiniIcon(daily.weathercode[i]);
-        
+
         const card = document.createElement('div');
         card.className = 'week-card';
         card.innerHTML = `
